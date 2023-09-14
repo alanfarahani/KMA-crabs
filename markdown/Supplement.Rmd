@@ -1,0 +1,722 @@
+---
+title: "Stable isotopes of archaeological and modern semi-terrestrial crabs (Potamon potamios) provide paleoecological insights into brachyuran ecology and human resource acquisition in late Holocene Jordan"
+author: "Alan Farahani"
+date: '2023: Quaternary International 658: 14-23'
+output: 
+  bookdown::html_document2:
+    code_folding: hide
+    df_print: paged
+    toc: true
+    toc_depth: 3
+    toc_float: 
+      collapsed: true
+    font_adjustment: +3
+    fig_caption: true
+    number_sections: true
+    global_numbering: true
+    theme: readable
+---
+
+# Introduction
+
+This markdown provides the ability to reproduce the analyses conducted in [Farahani, A., Miller, M.J., Porter, B.W., Dawson, T. and Routledge, B. 2023. Stable isotopes of archaeological and modern semi-terrestrial crabs (Potamon potamios) provide paleoecological insights into brachyuran ecology and human resource acquisition in late Holocene Jordan. Quaternary International 658: 14-23](https://www.sciencedirect.com/science/article/pii/S1040618223000733).
+
+Note that KMA throughout this markdown refers to the archaeological site under study, Khirbat al-Mudayna al-’Aliya.
+
+If there are any questions, please contact Alan Farahani at [alanfarahani\@gmail.com](mailto:alanfarahani@gmail.com){.email}
+
+## Instructions
+
+Reproducing the data requires specific packages to be present. First it is highly recommended that R Studio (or IDE equivalent) is used, with the latest version of `knitr` and `bookdown` to be able to compile this markdown document. Moreover, most subsequent analyses rely on the `tidyverse` ecosystem (and the `magrittr` pipe syntax). See the libraries loaded in setup for what must be installed via `install.packages()` prior to use.
+
+It is possible that by the time this code is reproduced (by you), some of the functions upon which these analyses depend may be deprecated. If that is the case it is hoped that the logic of the code will be evident enough for it to be re-written using updated or different syntax (or another language).
+
+Many of the commands have `%>% kable(.)` added to them, which enhances the readability of tables in compiled R Markdown files. The latter should be *removed* in order to use any of these analyses outside of the R Markdown environment.
+
+Finally, **ensure that the data are in the same folder as the R Markdown in order for it to successfully compile**.
+
+```{r setup, warning=FALSE, message = FALSE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+
+library(tidyverse)
+library(broom)
+library(reshape2)
+library(kableExtra)
+library(ggforce)
+library(ggrepel)
+
+
+# load these CSVs to run the subsequent analyses
+# make sure to change the paths if the folder structure is updated
+
+# NISP of recovered crab parts
+crab_arch_nisp = read.csv("../data/KMA Potamon Archaeological NISP.csv")
+
+# morphometric data from archaeological crabs
+crab_arch_morph = read.csv("../data/KMA Potamon Archaeological Measurements and Isotopes.csv")
+
+# modern crab morphological, isotopic, and geolocation data
+crab_modern = read.csv('../data/KMA Potamon Modern Measurements and Isotopes.csv')
+
+# standardized location of sampled modern crabs
+crab_loc = read.csv("../data/KMA Potamon Modern Crab Locations.csv")
+crab_loc = crab_loc %>% select(-"Year")
+
+# standardized locations of sampled water from the same pools as the crabs
+water_loc = read.csv("../data/KMA Potamon Modern Water Locations.csv")
+water_loc = water_loc %>% select(-"Year")
+
+```
+
+
+# Methodological Considerations
+
+Three archaeological crab pincer samples were split after non-chemical preparation (i.e. mortar-and-pestling) to identify the effects of chemical treatment on subsequent isotopic values.  The following table shows the difference in isotopic values between post-treatment and non-treatment values for each of the specimen sample pairs.
+
+```{r, fig.cap= "caption"}
+
+treatment_effects = data.frame(sample_id = c('UID1', 'UID1','UID14', 'UID14', 'UID103','UID103'),
+                                sample_type = rep('archaeological', 6),
+                                excavation_unit = rep(c('2G86', '5I05', '2G87'), each = 2),
+                                isotope = rep(c('d13C', 'd18O'), 3),
+                                no_treatment = c(-8.90, -4.33, -9.87,-3.32,-8.38,-3.54),
+                                post_treatment = c(-8.62,-4.23,-9.11,-2.98,-8.17,-3.70)
+)
+
+treatment_effects %>%
+  mutate(difference = post_treatment - no_treatment) %>%
+  pivot_wider(id_cols = c(sample_id, excavation_unit),
+              names_from = isotope,
+              values_from = difference) %>%
+  rename(`Sample ID` = sample_id,
+         `Excavation Unit` = excavation_unit) %>%
+   kable(., "pandoc",caption = "Difference between post-treatment and non-treatment isotopic values for samples split from  same archaeological specimen.")
+
+```
+
+While there were various parts of possible P. potamios specimens recovered archaeologically, only the right upper dactyls were used for destructive isotopic analysis since each organism can have only one.  Therefore, the isotopic values should reflect previously existing individual specimens.
+
+```{r}
+
+crab_nisp_base = crab_arch_nisp %>%
+    melt(id.vars = 1:4, variable.name = "Part", value.name = "NISP") %>%
+    mutate(NISP = as.numeric(NISP)) %>%
+    filter(!is.na(NISP), Square != "20") %>% 
+    dcast(Square ~ Part, value.var = "NISP", fun.aggregate = sum, fill = 0) %>%
+    mutate(Total = rowSums(select(., RUD:Unidentifable_Parts))) %>%
+    select(Square, RUD:Total) %>%
+    rename(`Excavation Unit` = Square)
+
+crab_col_totals = crab_nisp_base %>%
+  summarise_if(is.numeric, sum) %>%
+  mutate(`Excavation Unit` = "Total")
+
+crab_nisp_base %>%
+      bind_rows(crab_col_totals) %>%
+      mutate(across(RUD:Cheliped, ~ifelse(. == 0, "-", .))) %>%
+      kable(., "pandoc", caption = "The counts of identified archaeological potomonautid remains recovered from each excavation unit at KMA.")
+```
+
+
+# Regression Modeling
+
+## Estimation of carapace size in archaeological populations
+
+Ordinary least squares models were employed to predict P. potamios carapace height (i.e. size) from the ventral measurement of the right upper dactyl on specimens collected in 2011 and 2012.  An allometric model, one that allows for a non-linear (quadratic) relationship between the predictor (right upper dactyl length) and outcome (carapace height) does not improve prediction accuracy, unlike the C. sapidus specimens measured in Rick et al. 2015.
+
+## Linear Model
+
+The raw output of a linear model $CarapaceHeight{_i} = \alpha + Dactyl(V){_i}*x + \epsilon{_i}$ is the following:
+
+```{r}
+
+# Create the linear model using P. potamios collected in 2011 and 2012
+crab_modern_lm = lm(CA_H ~ RUD_V, data = crab_modern)
+
+summary(crab_modern_lm)
+```
+
+An allometric model does not improve the regression model quality.  It appears that the relationship between pincer and carapace size is linear.
+
+```{r}
+
+summary(lm(CA_H ~ poly(RUD_V,2), data = crab_modern[!is.na(crab_modern$RUD_V),]))
+
+```
+
+
+## Linear Model Diagnostics
+Diagnostics for the linear model show that this model does not violate most assumptions of ordinary least squares regression (such as random variation in the error term), although crab number 68 (the 68th row in the data frame) is an outlier.
+
+```{r}
+
+plot(crab_modern_lm)
+
+```
+
+## Prediction of Archaeological Carapace Sizes
+The following predicts the carapace size of the archaeological population using the linear model above.  The linear model is again derived from the modern P. potamios specimens collected in the wadi directly below the KMA site.
+
+```{r, fig.cap = "Estimated carapace height of archaeological specimens based on the ventral length of the right upper dactyl.  The dashed lines represent the full range of the prediction interval (i.e. the total possible predicted carapace size range based on the linear model) while the shaded ribbon indicates two standard-errors of the estimate of the slope."}
+
+crab_arch_pred_size = predict.lm(crab_modern_lm, crab_arch_morph, se.fit = TRUE)
+
+crab_arch_pred_interval = predict.lm(crab_modern_lm, crab_arch_morph, interval = "prediction")
+
+crab_arch_morph %>%
+  cbind(crab_arch_pred_size) %>%
+  cbind(crab_arch_pred_interval[,c("lwr","upr")]) %>%
+  ggplot(aes(RUD_V, fit)) +
+  geom_line(aes(y = upr), alpha = .7, linetype = "dashed") +
+  geom_line(aes(y = lwr), alpha = .7, linetype = "dashed") +
+  geom_ribbon(aes(ymax = fit + (2*se.fit), ymin = fit - (2*se.fit)), alpha = .7, fill = "grey") +
+  geom_point() +
+  theme_classic(base_size = 13) +
+  ylab("Estimated Carapace Height (in mm)\n") +
+  xlab("\nRight Upper Dactyl (V - ventral length in mm)")
+
+```
+
+Ashkenazi et al. 2005 also estimated P. potamios carapace size at Gesher Benot Ya'akov (GBY).  There is no statistically significant difference in carapace estimates using the regression equations derived from the KMA crabs and the GBY ones. The coefficient estimates from linear models using the Jordanian data differ mainly in the estimate of the intercept -- the RU-v RU-h equation presented by Ashkenazi et al. 2005 is very similar to the estimation of the effect of the RU-h on RU-v for these contemporary specimens near KMA, but the estimate of the intercept is much lower for the GBY population.
+
+```{r crab-model-comparisons-carapace, fig.cap = "Welch's two-sample t-test output comparing the predicted sizes of crab carapaces at KMA using linear model equations from Ashkenazi et al. 2005 and from this study."}
+# GBY CA h - RU v linear model derived from Ashkenazi et al. 2005 p. 686
+# This is the equation for the "Total" category
+# 1.874x + 6.179
+
+# this function calculates the estimated carapace size based on x (the ventral measurement of the right upper dactyl)
+estimCaGBY = function(x){
+  ca = (1.874 * x) + 6.179
+  return(ca)
+}
+
+crab_arch_morph %>%
+    cbind(crab_arch_pred_size) %>%
+    rename(Estimated_CA_Jor = fit) %>%
+    select(RUD_V, Estimated_CA_Jor) %>%
+    mutate(Estimated_CA_GBY = estimCaGBY(RUD_V)) %>%
+    do(tidy(t.test(.$Estimated_CA_GBY, .$Estimated_CA_Jor))) %>%
+    t
+
+```
+## Prediction of Dactyl Length
+
+Some right upper dactyls were broken and did not preserve the full ventral length, which prevents direct estimation of carapace size.  To incorporate these specimens, dactyl ventral length (RUD-V) was predicted from dactyl height (RUD-H).
+
+```{r}
+
+# GBY RU v - RU h regression Ashkenazi et al. 2005 p. 685
+# Using Total
+# 2.785x + 1.212
+
+estimRUDvGBY = function(x){
+  rudv = (2.785 * x) + 1.212
+  return(rudv)
+}
+
+# Create the linear model using crabs from the field
+crab_modern_lm = lm(RUD_V ~ RUD_H, data = crab_modern)
+
+summary(crab_modern_lm)
+```
+
+Model diagnostics for the prediction of RUD-V from RUD-H:
+
+```{r}
+plot(crab_modern_lm)
+```
+
+
+## Full prediction of carapace sizes
+
+Ashkenazi et al. 2005 also provide a regression equation to predict the RUD-V from RUD-H.
+
+Comparison of the estimated ventral lengths of the right upper dactyl using the Ashkenazi et al. 2005 equation and that derived from the previous linear model reveals that the estimated ventral lengths are different. The confidence interval for this difference ranges from -2.7 to 0.004, i.e. the majority of the confidence interval is nonzero, although strictly speaking the possibility that the true difference is zero can not be excluded.  
+
+As a consequence, the estimates derived from the Wadi Mujib P. potamios population are preferred for consistency.  The result is that subsequent carapace height estimates are consistently biased in a downward direction for larger organisms.
+
+```{r}
+
+crab_arch_pred_size = predict.lm(crab_modern_lm, crab_arch_morph, se.fit = TRUE)
+
+crab_arch_morph %>%
+    cbind(crab_arch_pred_size) %>%
+    rename(Estimated_RUDV_Jor = fit) %>%
+    select(RUD_H,RUD_V, Estimated_RUDV_Jor) %>%
+    mutate(Estimated_RUDV_GBY = estimRUDvGBY(RUD_H)) %>%
+    do(tidy(t.test(.$Estimated_RUDV_GBY, .$Estimated_RUDV_Jor))) %>%
+    kable(., "pandoc", digits = 2, caption = "Welch's two sample t-test output for comparison of estimated carapace sizes between regression parameters generated in this study vs. Ashkenazi et al. 2005.")
+```
+
+The final prediction of carapace sizes therefore uses a) an estimate of RUD-V length from RUD-H (if RUD-V was not preserved) and b) an estimate of carapace height (CA-H) from RUD-V length.
+
+```{r}
+
+crab_modern_rudv_lm = lm(RUD_V ~ RUD_H, data = crab_modern)
+
+crab_arch_pred_rudv = predict.lm(crab_modern_rudv_lm, crab_arch_morph)
+
+crab_modern_lm = lm(CA_H ~ RUD_V, data = crab_modern)
+
+crab_arch_morph_estim = crab_arch_morph %>%
+    cbind(Estim_RUDV = crab_arch_pred_rudv) %>%
+    mutate(RUD_V = ifelse(is.na(RUD_V), Estim_RUDV, RUD_V))
+
+crab_arch_pred_size = predict.lm(crab_modern_lm, crab_arch_morph_estim)
+
+crab_arch_morph_estim = crab_arch_morph_estim %>%
+  cbind(Estim_CA_H = crab_arch_pred_size)
+```
+
+
+# Isotopic Analyses
+
+
+## Comparison of oxygen to carbon for archaeological crabs
+
+This is the full output of the correlation of carbon and oxygen isotopic values in crab RUDs (right upper dactyls).  Note the correlation (.93) and the confidence interval (.87 - .97) of the correlation estimate.
+
+```{r isotope-correlation-arch}
+
+cor.test(crab_arch_morph$d18O, crab_arch_morph$d13C)
+
+```
+
+The following generates Figure 2, which represents the visualization of isotopic values in the archaeological population.
+
+In (A) and (B) the x-axis represents the excavation unit, and the y-axis represents the parts-per-mil concentration of the particular stable isotope (carbon, oxygen). Note the small sample sizes from all of the non-midden contexts (i.e. everything other than 5IO5).  In (C) the isotopic values of the archaeological crab carapaces are compared. The correlation is provided in the lower-right of the plot, and its values are derived from the preceding analysis.
+
+```{r isotope-value-distributions, fig.cap='Boxplots of the distribution of (A) of oxygen and (B) carbon stable isotope values across sampled archaeological P. potamios specimens with individual points to the left of each boxplot. The x-axis indicates the excavation unit from which those remains derived.  The points for 5I05 alone were “jittered” to reduce overplotting due to a large number of similar values. (C) The relationship of the C and O isotope values from the archaeological crabs, where the excavation unit from which that specimen was sampled is symbolized by differing shapse. The Pearson correlation coefficient is provided in the bottom right.'}
+
+a = crab_arch_morph %>%
+    ggplot(aes(Square,d18O)) + 
+    geom_boxplot(outlier.alpha = 0, position = position_nudge(x = .3), width = .3, fill = "grey") +
+    geom_point(data = . %>% filter(Square == "5I05"),
+                                   position = position_jitter(width = .08), alpha = .7, pch = 21, fill = "grey") +
+    geom_point(data = . %>% filter(Square != "5I05"), alpha = .7, pch = 21, fill = "grey") +
+    theme_classic(base_size=13) +
+    theme(axis.title.x = element_text(size = 9)) +
+    ylab(bquote(delta^18~"O"[VPDB]~"(‰)")) +
+    xlab("Excavation Unit")
+
+b = crab_arch_morph %>%
+    ggplot(aes(Square,d13C)) + 
+    geom_boxplot(outlier.alpha = 0, position = position_nudge(x = .3), width = .3, fill = "grey") +
+    geom_point(data = . %>% filter(Square == "5I05"),
+               position = position_jitter(width = .08), alpha = .7, pch = 21, fill = "grey") +
+    geom_point(data = . %>% filter(Square != "5I05"), alpha = .7, pch = 21, fill = "grey") +
+    theme_classic(base_size=13) +
+    theme(axis.title.x = element_text(size = 9)) +
+    ylab(bquote(delta^13~"C"[VPDB]~"(‰)")) +
+    xlab("Excavation Unit")
+
+
+
+c = crab_arch_morph %>%
+    ggplot(aes(d13C,d18O)) + 
+    geom_point(aes(shape=Square), size = 3) +
+    theme_bw(base_size=15) +
+    xlab(bquote(delta^13~"C"[VPDB]~"(‰)")) +
+    ylab(bquote(delta^18~"O"[VPDB]~"(‰)")) +
+    theme( panel.grid=element_blank(),
+           legend.position = c(0.18,.80)
+           ) +
+    annotate("text", label = "r = .93, 95% CI = .87 - .97", x = -8, y = -10)+
+    labs(shape = "Excavation Unit")
+
+ggpubr::ggarrange(ggpubr::ggarrange(a,b, ncol = 1, labels = c("A", "B"), nrow = 2),
+                  c,
+                  labels = c("", "C"),
+                  widths = c(.6,1))
+
+rm(a,b,c)
+```
+
+## Summary statistics of sampled water
+
+The following table represents the values of the oxygen isotopes ($\delta^{18}$O$_{SMOW}$) in the pools of water from which crabs were either sampled or measured.
+
+```{r}
+water_stats = crab_modern %>%
+    filter(!is.na(d18O_SMOW)) %>%
+    distinct(WadiSystem, d18O_SMOW, Associated_Water_Sample) %>%
+    group_by(WadiSystem) %>%
+    summarise(n = n(),
+              mean = mean(d18O_SMOW),
+              sd = sd(d18O_SMOW),
+              median = median(d18O_SMOW),
+              min = min(d18O_SMOW),
+              max = max(d18O_SMOW),
+              ) %>%
+    mutate_if(is.numeric, ~round(., 2))
+
+temp_stats = crab_modern %>%
+    filter(!is.na(d18O_SMOW)) %>%
+    distinct(WadiSystem, d18O_SMOW,H20Temp,H20pH,Depth) %>%
+    group_by(WadiSystem) %>%
+    summarise(temp = mean(H20Temp, na.rm = T),
+              pH = mean(H20pH, na.rm = T),
+              depth = mean(Depth, na.rm = T)
+              ) %>%
+    mutate_if(is.numeric, ~round(., 2))
+
+temp_sd = crab_modern %>%
+    filter(!is.na(d18O_SMOW)) %>%
+    distinct(WadiSystem, d18O_SMOW,H20Temp,H20pH,Depth) %>%
+    group_by(WadiSystem) %>%
+    summarise(temp_sd = sd(H20Temp, na.rm = T),
+              pH_sd = sd(H20pH, na.rm = T),
+              depth_sd = sd(Depth, na.rm = T)
+              ) %>%
+    mutate_if(is.numeric, ~round(., 2))
+
+water_stats %>%
+  left_join(temp_stats, by = "WadiSystem") %>%
+  left_join(temp_sd, by = "WadiSystem") %>%
+  mutate(temp = paste0(temp, " +/- ", temp_sd),
+         pH = paste0(pH, " +/- ", pH_sd),
+         depth = paste0(depth, " +/- ", depth_sd)) %>%
+  select(-temp_sd, -pH_sd, -depth_sd) %>%
+  rename(Wadi = WadiSystem) %>%
+  kable(., "pandoc", caption = "Water sample and isotopic summary data for all water samples in each wadi system, including temperature, pH, and depth, where recorded.", digits = 2)
+
+```
+
+## Sampled water and crab specimen spatial distributions
+
+Each contemporary P. potamios specimen was geolocated.  The following figures represent the location of both measured and sampled crabs. Note: in order for this code to be reproduced, a (free) Google Maps API key is necessary.
+
+
+```{r, fig.cap = "The locations of the water samples collected from standing pools in the Wadi Mujib in 2011 and 2012.  The color of the point represents the values of stable inorganic oxygen (d18O, SMOW) from those water samples."}
+
+library(ggmap)
+library(ggsn)
+
+# The following line must be uncommented (# removed) and an api key generated FROM GOOGLE in order for this plot to work
+# register_google(key="YOUR_KEY_HERE", write=TRUE)
+
+crab_map = get_googlemap(
+                      c(35.87, 31.3),
+                      maptype = "satellite",
+                      source = "google",
+                      scale = 2,
+                      zoom = 13,
+                      size = c(400, 400)
+                    )
+
+crab_loc_map = crab_modern %>%
+  left_join(crab_loc, by = "Spec_ID") %>%
+  filter(WadiSystem == "Wadi Mujib") %>%
+  rename(lat = ycoord, long = xcoord) %>%
+  mutate(SMOWcut = cut(d18O_SMOW, breaks = c(-5,0,5,10,15)),
+         d18Ocut = cut(d18O_R3C, breaks = c(-5,-4,-3,-2,-1,0,1)))
+
+ggmap(crab_map) +
+    geom_point(data = crab_loc_map %>% filter(!is.na(SMOWcut)), aes(long,lat, fill = SMOWcut), shape = 21, size = 4) +
+    facet_wrap(~Year) +
+    xlab("") +
+    ylab("") +
+    scale_fill_brewer(palette = "RdBu") +
+    labs(fill = bquote(delta^18~"O"[SMOW]))
+```
+
+```{r, fig.cap = "The location of the P. potamios specimens sampled for stable inorganic carbon and oxygen isotopes in 2011 and 2012. The color of the point represents the values of stable inorganic oxygen (d18O, VPDB) from the crab specimens."}
+ggmap(crab_map) +
+    geom_point(data = crab_loc_map %>% filter(!is.na(d18Ocut)), aes(long,lat, fill = d18Ocut), shape = 21, size = 4) +
+    facet_wrap(~Year) +
+    xlab("") +
+    ylab("") +
+    scale_fill_brewer(palette = "RdBu") +
+    labs(fill = bquote(delta^18~"O"[VPDB]))
+```
+
+## Correlation of estimated (or actual) carapace size to isotopic values
+
+There is no correlation between predicted carapace sizes of the archaeological P. potamios population and their stable inorganic isotope (C,O) values.
+
+```{r, fig.cap = "A comparison of the estimated carapace size of the archaeological populations (with density plot of estimated size in mm above) to each of the stable isotope (C,O) values measured from the crabs themselves."}
+a = ggpubr::ggdensity(crab_arch_morph_estim, "Estim_CA_H", fill = "Part", palette = "Spectral")
+
+a = a + ggpubr::clean_theme() + theme(legend.position = "none")
+
+b = crab_arch_morph_estim %>%
+    select(Estim_CA_H, d13C, d18O) %>%
+    melt(id.vars = 1)
+
+b$variable = gsub("d13C", "Carbon", b$variable)
+b$variable = gsub("d18O", "Oxygen", b$variable)
+
+# In standard scientific isotopic notation
+# b$variable = gsub("d13C", paste0("~delta*{}^13*C[VPDB]"), b$variable)
+# b$variable = gsub("d18O", paste0("~delta*{}^18*O[VPDB]"), b$variable)
+
+b = b %>%
+    ggplot(aes(Estim_CA_H, value)) +
+    geom_point() +
+    facet_wrap(~variable, ncol = 1, labeller = label_parsed, scales = "free_y") +
+    theme_bw(base_size = 13) + 
+    theme(panel.grid = element_blank()) +
+    #notice the hack which is a "  " to allow for separate y axis labels
+    ylab(bquote(delta^18~"O"[VPDB]~"(‰)"~"   "~delta^13~"C"[VPDB]~"(‰)")) +
+    xlab("Estimated Carapace Size (in mm)")
+
+ggpubr::ggarrange(a,NULL, b, ncol = 1, align = "hv", heights = c(.5, -0.1, 1))
+```
+
+The same lack of correlation between carapace size and either oxygen or carbon isotope values is evident in the contemporary specimens as well.
+
+```{r, fig.cap="A comparison of the estimated carapace size of the contemporary populations to each of the stable isotope (C,O) values measured from the crabs themselves. Point colors represent specimens from each of the sampled wadis."}
+
+crab_modern %>%
+    select(WadiSystem, CA_H, d13C_R3C, d18O_R3C) %>%
+    melt(id.vars = 1:2) %>%
+    ggplot(aes(CA_H, value)) +
+    geom_point(aes(fill = WadiSystem), shape = 21, size = 3) +
+    facet_wrap(~variable, ncol = 1, labeller = label_parsed) +
+    theme_bw(base_size = 13) + 
+    theme(panel.grid = element_blank(), legend.position = "top", legend.title = element_blank()) +
+    ylab("") +
+    xlab("Carapace Height (in mm)") +
+    ggpubr::fill_palette("Set1") +
+    ggtitle("Contemporary Specimens")
+
+```
+
+## Comparison of carbon and oxygen isotopes across all wadis
+
+```{r, fig.cap="A comparison of the d13C and d18O isotope values sampled from the contemporary and archaeological P. potamios specimens.  The color of each point represents the contemporary Wadi from which the organism was derived, except for the archaeological remains.  The ellipses represent 95% confidence intervals based on a multivariate t-distribution. There is no ellipse for Wadi Jerash due to low sample size."}
+crab_modern %>%
+    bind_rows(
+        crab_arch_morph %>%
+            rename(d13C_R3C = d13C,
+                   d18O_R3C = d18O) %>%
+            mutate(WadiSystem = "Archaeological")
+    ) %>%
+    ggplot(aes(d13C_R3C,d18O_R3C)) +
+    geom_point(aes(fill=WadiSystem),size=4, pch = 21) +
+    theme_bw(base_size=15) +
+    xlab(bquote(delta^13~"C"[VPDB]~"(‰)")) +
+    ylab(bquote(delta^18~"O"[VPDB]~"(‰)")) +
+    theme(panel.grid=element_blank(),
+          legend.position = c(0.14,.85),
+          legend.title = element_blank(),
+          legend.box.background = element_rect(colour = "black"),
+          legend.spacing.y = unit(0, "mm"),
+          legend.text = element_text(size = 10),
+          legend.key.size = unit(5, "mm")) +
+    stat_ellipse(aes(colour=WadiSystem)) +
+    ggpubr::fill_palette("Spectral") +
+    ggpubr::color_palette("Spectral")
+```
+
+## All d18O pool water of capture correlated to d18O in carapace of organism
+
+The following plot excludes the archaeological specimens from comparison, but brackets (or 'facets' using ggplot2 terminology) out the separate years of collection.  It can be seen that at least in the Wadi Mujib the oxygen and carbon values of sampled specimens are similar.
+
+
+```{r, fig.cap = "A comparison of the d13C and d18O isotope values sampled from the contemporary a P. potamios specimens.  The color of each point represents the contemporary Wadi from which the organism was derived.  The ellipse represents a 95% confidence interval based on a multivariate t-distribution for the Wadi Mujib alone."}
+crab_modern %>%
+  ggplot(aes(d18O_SMOW,d18O_R3C)) +
+  geom_point(aes(fill=WadiSystem),size=3, shape = 21) +
+  theme_bw(base_size=15) +
+  xlab(bquote(delta^18~"O"[SMOW])) +
+  ylab(bquote(delta^18~"O"[VPDB])) +
+  theme( panel.grid=element_blank(),
+         legend.position = "top",
+         legend.title = element_blank()) +
+  stat_ellipse(aes(colour=WadiSystem)) +
+  facet_wrap(~Year) +
+  ggpubr::fill_palette("Spectral") +
+  ggpubr::color_palette("Spectral")
+```
+
+
+## Correlation of water temperature and stable inorganic isotope values for contemporary specimens
+
+Pairs plots provide simultaneous comparison of several quantitative variables.  Although it is not used, the code that is "commented out" provides an alternative method of generating a pairs plot of d13C, d18O (carapace), d18O (water), and temperature using the `GGally` library.
+
+```{r}
+
+# The commented-out code below uses the GGally library
+
+# var_names = c(
+#   paste0("H[2]~O~Temperature"),
+#   paste0("delta~O[SMOW]^18"),
+#   paste0("delta~C[VPDB]^13"),
+#   paste0("delta~O[VPDB]^18")
+# )
+# 
+# #exclude the outlier, which is a huge leverage point
+# crab_modern %>%
+#   select(H20Temp, d18O_SMOW, d13C_R3C, d18O_R3C) %>%
+#   filter(H20Temp > 0, d13C_R3C < -5) %>%
+#   GGally::ggpairs(columnLabels = var_names, labeller = "label_parsed") +
+#   theme_bw() +
+#   theme(panel.grid = element_blank())
+# 
+# #include the outlier
+# crab_modern %>%
+#   select(H20Temp, d18O_SMOW, d13C_R3C, d18O_R3C) %>%
+#   filter(H20Temp > 0) %>%
+#   GGally::ggpairs(columnLabels = var_names, labeller = "label_parsed") +
+#   theme_bw() +
+#   theme(panel.grid = element_blank())
+
+crab_pairs = crab_modern %>%
+    select(H20Temp, d18O_SMOW, d13C_R3C, d18O_R3C) %>%
+    filter(H20Temp > 0, d13C_R3C < -5)
+
+pairs(~H20Temp + d18O_SMOW + d13C_R3C + d18O_R3C,
+      labels = c("Temperature", "Oxygen (water)", "Carbon", "Oxygen (carapace)"),
+      data = crab_pairs,
+      bg = "grey",
+      pch = 21,
+      cex = 1.5,
+      cex.axis = 1.4,
+      upper.panel = NULL)
+
+```
+
+Because base R `pairs` does not provide correlation 'tests' without writing a custom function, for simplicity a correlation test was run for each comparison, the inflation of Type I error notwithstanding due to each independent test.  Additional code is provided to run the same Pearson's correlation tests but with adjustment for multiple comparisons.
+
+```{r}
+
+crab_corrs = crab_modern %>%
+    select(H20Temp, d18O_SMOW, d13C_R3C, d18O_R3C) %>%
+    filter(H20Temp > 0, d13C_R3C < -5) # excluding the outlier
+
+poss_crab_corrs = combn(names(crab_corrs), m = 2)
+    
+
+actual_crab_corrs = data.frame()
+
+for(i in 1:dim(poss_crab_corrs)[2]){
+  
+  this_comparison = poss_crab_corrs[,i]
+  
+  var1 = this_comparison[1]
+  var2 = this_comparison[2]
+  
+  crab_corr = crab_corrs %>%
+    do(tidy(cor.test(.[,var1], .[,var2])))
+  
+  crab_corr$comparison = paste0(var1," - ", var2)
+  
+  actual_crab_corrs = rbind(crab_corr, actual_crab_corrs)
+  
+}
+
+actual_crab_corrs = actual_crab_corrs %>%
+    mutate_if(is.numeric, ~round(., 2)) %>%
+    select(-method, -alternative) %>%
+    relocate(conf.low, .before = "estimate") %>%
+    relocate(conf.high, .after = "estimate") %>%
+    rename(`95% CI low` = conf.low,
+           `95% CI high` = conf.high,
+           correlation = estimate,
+           `degrees of freedom` = parameter,
+           `p-value` = p.value,
+           `t-value` = statistic) %>%
+    as.data.frame()
+
+crab_comps = actual_crab_corrs$comparison
+crab_comps = gsub("R3C", "crab", crab_comps)
+crab_comps = gsub("SMOW", "water", crab_comps)
+
+actual_crab_corrs = actual_crab_corrs %>%
+  select(-comparison) %>%
+  t %>%
+  as.data.frame()
+
+names(actual_crab_corrs) = crab_comps
+
+actual_crab_corrs %>%
+  kable(., "pandoc", caption = "Pearson's correlations of stable inorganic isotopic values from the sampled contemporary P. potamios specimens and the water of the pools in which they were found.")
+
+
+```
+
+Adjusted estimates of the correlations that correct for the issue of multiple comparisons, such as using Holm's, is the following.  Note that this uses an additional package (`psych`).
+
+```{r}
+library(psych)
+
+ crab_modern %>%
+    select(H20Temp, d18O_SMOW, d13C_R3C, d18O_R3C) %>%
+    filter(H20Temp > 0, d13C_R3C < -5) %>% 
+    corr.test() %>% 
+    print(short = FALSE)
+```
+
+## Correlations of carapace oxygen isotopes to those in water samples
+
+Contemporary P. potamios specimens were measured both outside and inside of water.  When possible, the water from pools in which crab specimens were measured were also sampled, and have the designation "W" for water.
+
+The following three visualizations provide different 'slices' of the comparison of the oxygen isotope values from crabs that were sampled and measured inside of pools, along with the oxygen isotope values of the water of the pools in which the crabs were found.
+
+```{r, fig.cap= "Comparison of oxygen isotopes derived from water (d18O SMOW) and those derived from the carapace of the contemporary Potamon organisms (d18O VPDB) in the Wadi Mujib. Color distinguishes each of these 'groupings of pools'."}
+
+spatial_water_groups = crab_modern %>%
+    filter(WadiSystem == "Wadi Mujib", !is.na(d18O_R3C)) %>%
+    distinct(Associated_Water_Sample) %>%
+    filter(Associated_Water_Sample != "") %>%
+    cbind(Spatial_Group = c(1,1,2,2,3,3,4,4,4,5,5,6,6,7,7))
+
+crab_modern %>%
+    filter(WadiSystem == "Wadi Mujib") %>%
+    left_join(spatial_water_groups, by = "Associated_Water_Sample") %>%
+    ggplot(aes(d18O_SMOW, d18O_R3C)) +
+    geom_point(aes(fill = as.character(Spatial_Group)), shape = 21, size = 3) +
+    geom_text_repel(aes(label = Associated_Water_Sample, colour = as.character(Spatial_Group)), size = 4) +
+    facet_wrap(~Year) +
+    theme_bw(base_size = 15) +
+    theme(panel.grid = element_blank(), legend.position = "none") +
+    xlab(expression(paste(delta^{18}, "O (\u2030, SMOW)"))) +
+    ylab(expression(paste(delta^{18}, "O (\u2030, VPDB)"))) +
+    ggpubr::fill_palette("Paired") +
+    ggpubr::color_palette("Paired")
+```
+
+```{r, fig.cap="Comparison of oxygen isotopes derived from water (d18O SMOW) and those derived from the carapace of the contemporary Potamon organisms (d18O VPDB).  Each grid panel represents a different year of sampling.  Each point represents a sampled crab with an accompanying abbreviation that represent the Wadi (WM = Mujib, WJeE = Jerash-East, WH = Heidan) from which that specimen was sampled and the pool water sample number (i.e. 001, 002, etc.) associated with it. Color, distinguishes each of these 'groupings of pools'."}
+spatial_water_groups = crab_modern %>%
+    filter(!is.na(d18O_R3C)) %>%
+    distinct(Associated_Water_Sample) %>%
+    filter(Associated_Water_Sample != "") %>%
+    cbind(Spatial_Group = c('H1', 'H2', 'J1', 'J2', 1,1,2,2,3,3,4,4,4,5,5,6,6,7,7))
+
+plot_cols = RColorBrewer::brewer.pal(length(unique(spatial_water_groups$Spatial_Group)), "Paired")
+
+plot_cols[11] = "#000000"
+
+crab_modern %>%
+    left_join(spatial_water_groups, by = "Associated_Water_Sample") %>%
+    ggplot(aes(d18O_SMOW, d18O_R3C)) +
+    geom_point(aes(fill = as.character(Spatial_Group)), shape = 21, size = 3) +
+    geom_text_repel(aes(label = Associated_Water_Sample, colour = as.character(Spatial_Group)), size = 4) +
+    facet_wrap(~Year) +
+    theme_bw(base_size = 15) +
+    theme(panel.grid = element_blank(), legend.position = "none") +
+    xlab(expression(paste(delta^{18}, "O (\u2030, SMOW)"))) +
+    ylab(expression(paste(delta^{18}, "O (\u2030, VPDB)"))) +
+    scale_fill_manual(values = plot_cols) +
+    scale_colour_manual(values = plot_cols)
+```
+
+```{r, fig.cap="Comparison of oxygen isotopes derived from water (d18O SMOW) and those derived from the carapace of the contemporary Potamon organisms (d18O VPDB).  Each grid panel represents a different year of sampling.  Each point represents a sampled crab with an accompanying abbreviation that represent the Wadi (WM = Mujib, WJeE = Jerash-East, WH = Heidan) from which that specimen was sampled and the pool water sample number (i.e. 001, 002, etc.) associated with it. Ellipses surround crab-water combinations collected within 15m (a “grouping of pools”).  Color, where available, distinguishes each of these 'groupings of pools'."}
+crab_modern %>%
+    left_join(spatial_water_groups, by = "Associated_Water_Sample") %>%
+    filter(!is.na(d18O_SMOW), !is.na(d18O_R3C)) %>%
+    ggplot(aes(d18O_SMOW, d18O_R3C)) +
+    geom_point(aes(fill = as.character(Spatial_Group)), shape = 21, size = 3) +
+    geom_text_repel(aes(label = Associated_Water_Sample, colour = as.character(Spatial_Group)), size = 4, box.padding = .5) +
+    facet_wrap(~Year) +
+    theme_bw(base_size = 15) +
+    theme(panel.grid = element_blank(), legend.position = "none") +
+    xlab(expression(paste(delta^{18}, "O (\u2030, SMOW)"))) +
+    ylab(expression(paste(delta^{18}, "O (\u2030, VPDB)"))) +
+    scale_fill_manual(values = plot_cols) +
+    scale_colour_manual(values = plot_cols) +
+    ggforce::geom_mark_ellipse(aes(group = Spatial_Group, color = Spatial_Group)) 
+
+```
+
