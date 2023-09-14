@@ -51,8 +51,3 @@ rsconnect/
 
 # Files used in submission
 .zip
-
-# Project specific files
-Supplemental Data.zip
-Supplement_base.Rmd
-Supplement_original.Rmd
