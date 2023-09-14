@@ -42,6 +42,8 @@ This repository contains the markdown and files needed to reproduce the analyses
 
 In brief, our research sought to identify whether or not stable inorganic isotopes derived from crab carapaces recovered at the archaeological site of Khirbet al-Mudayna al-Aliya, located in south-central Jordan and dated to ca. 1000 BCE, could be used as hyper-local climate proxies.  The short answer is: no.  But the longer answer is: because of the behavioral ecology of these [specific semi-terrestrial freshwater crabs ](https://en.wikipedia.org/wiki/Potamon_potamios), stable inorganic oxygen and carbon isotopes give us insight into past brachyuran paleoecology and human resource acquisition, especially this past community's foraging behavior.
 
+See the compiled analyses and figures **<a href = "http://thebalkarchaeology.com/markdowns/KMAcrabs.html" target = "_blank"> here</a>**.
+
 For more about the archaeological site of Khirbet al-Mudayna al-'Aliya (KMA), see: 
 
 - [Farahani, A., Porter, B.W., Huynh, H. and Routledge, B. 2016. Crop storage and animal husbandry at early Iron Age Khirbat al-Mudayna al-‘Aliya (Jordan): a paleoethnobotanical approach (Vol. 69, pp. 27-89). American Schools of Oriental Research.](https://livrepository.liverpool.ac.uk/3002334/1/AASOR69-KMA.pdf)
@@ -83,7 +85,7 @@ There are two folders, one for data, and another for the Markdown.  See descript
 : An (R) Markdown that allows for interactive reproducibility of all of the figures and tables found in the manuscript, plus some additional analyses.
 
 - `Supplement.html`
-: A compiled version of the Markdown in the event you just wanted to look at the figures.
+: A compiled version of the Markdown in the event you just wanted to <a href = "http://thebalkarchaeology.com/markdowns/KMAcrabs.html" target = "_blank"> look at the analyses and figures </a>.
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
